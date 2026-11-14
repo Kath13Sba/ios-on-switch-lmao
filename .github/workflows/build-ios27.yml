@@ -47,9 +47,9 @@ jobs:
           IOS: ${{ inputs.ios }}
         run: |
           : > "$RUNNER_TEMP/clean"
-          # Fails closed: a query that errors (as one over a target that cannot be analyzed does) counts as reaching.
+          # Fails closed: a query that errors counts as reaching. cquery: the selected configuration's graph.
           for t in $TARGETS; do
-            if ! path="$(bazel query "somepath($t, @ipsw//...)" 2> "$RUNNER_TEMP/query.err")"; then
+            if ! path="$(bazel cquery --config=release --config="$IOS" "somepath($t, @ipsw//...)" 2> "$RUNNER_TEMP/query.err")"; then
               echo "::warning::$t: the IPSW query failed; not built or uploaded"
               tail -3 "$RUNNER_TEMP/query.err"
             elif [ -n "$path" ]; then
@@ -60,14 +60,17 @@ jobs:
             fi
           done
           cat "$RUNNER_TEMP/clean"
-      # The GPU's raw runtime has release-only unused parameters/variables under -Werror (ios27 + release).
+      # The GPU's raw runtime has three release-only unused-symbol warnings, errors under -Werror (ios27 + release):
+      # marked [[maybe_unused]] here, no behaviour change.
       - name: Build the parts
         env:
           IOS: ${{ inputs.ios }}
-        run: >-
-          bazel build --config=release --config="$IOS" --keep_going
-          --per_file_copt='drivers/TegraGM20BMetal/raw/.*@-Wno-error=unused-parameter,-Wno-error=unused-variable,-Wno-error=unused-const-variable'
-          $(cat "$RUNNER_TEMP/clean") || true
+        run: |
+          sed -i 's|^id<MTLDevice> rmM2V(const char \*need)|id<MTLDevice> rmM2V([[maybe_unused]] const char *need)|' drivers/TegraGM20BMetal/raw/runtime/RawMetalM2V.mm
+          sed -i 's|^constexpr uint32_t kShortcutWords|[[maybe_unused]] constexpr uint32_t kShortcutWords|' drivers/TegraGM20BMetal/raw/runtime/raw_gpu.cpp
+          sed -i 's|^const char \*expandXrPlanes(PassDesc &p, Device &d)|const char *expandXrPlanes(PassDesc \&p, [[maybe_unused]] Device \&d)|' drivers/TegraGM20BMetal/raw/runtime/raw_xr_texture.cpp
+          git diff --stat
+          bazel build --config=release --config="$IOS" --keep_going $(cat "$RUNNER_TEMP/clean") || true
       - name: Collect the parts
         env:
           IOS: ${{ inputs.ios }}
