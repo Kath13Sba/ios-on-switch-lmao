@@ -1,7 +1,10 @@
 name: Build iOS 27 assets
-# The release's IPSW-free assets (//release:assets: sd, image-inputs with the linked kernel, gpu, overlay, loader, and
-# the host tools), built by Xcode on GitHub's macOS runner for the iOS this run names. Nothing here is made from the IPSW
-# or the device's data: release/ipsw_free.bzl refuses any such file at analysis. The image itself is composed elsewhere.
+# Fork: Kath13Sba/ios-on-switch-lmao (upstream 8670ab81 + this file).
+# The Xcode-built, IPSW-free parts of an iOS 27 image, built on GitHub's macOS runner: the GPU base, the overlay's
+# Mach-Os, iOS 27's linked, unprelinked kernel (xnu-12377, before Apple's kexts are prelinked), the loader and the SD
+# card's payload. //release:assets is iOS 17's only (its kernel_inputs are xnu-10063's), so each part is built by name.
+# Before anything is uploaded, every target is checked to have no path to the IPSW (@ipsw//...): one that has is not
+# uploaded. The IPSW-dependent steps (prelink, boot package, cryptexes, image) run elsewhere, from Apple's own IPSW.
 on:
   workflow_dispatch:
     inputs:
@@ -16,38 +19,68 @@ jobs:
   build:
     runs-on: xcode-27
     timeout-minutes: 360
+    env:
+      TARGETS: >-
+        //gpu:base
+        //kernel:kernel_unprelinked_12377
+        //boot:loader
+        //boot:loader_constants
+        //boot/installer:install-ios.bin
+        //boot/installer:apfs_tool
+        //drivers/SwitchBluetooth:BlueTool
+        //drivers/SwitchAudio:SwitchAudioHAL
+        //drivers/SwitchJoyCon:joyconpaird
+        //drivers/TegraGM20BMetal:SwitchShaderCompiler
+        //drivers/SwitchAppRegistration:switch-appregd
+        //drivers/SwitchVideoDecoders:HEVCH8
+        //drivers/SwitchVideoDecoders:AVD
+        //drivers/SwitchVideoEncoders:AVE
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: ./.github/actions/bazel
         with:
           cache: assets-${{ inputs.ios }}
           upload: "true"
-      # //release:assets carries iOS 17's linked kernel whatever the config (install:kernel_inputs), so iOS 27's linked,
-      # unprelinked kernel (XNU's source and this project's drivers only) is built and collected beside it.
-      - name: Build the assets
+      - name: Check no target reaches the IPSW
         env:
           IOS: ${{ inputs.ios }}
         run: |
-          targets=(//release:assets)
-          [ "$IOS" = ios27 ] && targets+=(//kernel:kernel_unprelinked_12377)
-          bazel build --config=release --config="$IOS" "${targets[@]}"
-      - name: Collect the assets
+          : > "$RUNNER_TEMP/clean"
+          for t in $TARGETS; do
+            path="$(bazel cquery --config=release --config="$IOS" "somepath($t, @ipsw//...)" 2>/dev/null || true)"
+            if [ -n "$path" ]; then
+              echo "::warning::$t reaches the IPSW; not built or uploaded:"
+              echo "$path" | head -5
+            else
+              echo "$t" >> "$RUNNER_TEMP/clean"
+            fi
+          done
+          cat "$RUNNER_TEMP/clean"
+      - name: Build the parts
+        env:
+          IOS: ${{ inputs.ios }}
+        run: bazel build --config=release --config="$IOS" --keep_going $(cat "$RUNNER_TEMP/clean") || true
+      - name: Collect the parts
         env:
           IOS: ${{ inputs.ios }}
         run: |
           dist="$RUNNER_TEMP/dist"
           mkdir "$dist"
-          for f in $(bazel cquery --config=release --config="$IOS" --output=files //release:assets); do
-            cp "$f" "$dist/"
-          done
-          if [ "$IOS" = ios27 ]; then
-            mkdir "$dist/kernel-12377"
-            for f in $(bazel cquery --config=release --config="$IOS" --output=files //kernel:kernel_unprelinked_12377); do
-              cp "$f" "$dist/kernel-12377/"
-            done
-          fi
+          while read -r t; do
+            name="$(echo "$t" | sed 's|^//||; s|[:/]|_|g')"
+            files="$(bazel cquery --config=release --config="$IOS" --output=files "$t" 2>/dev/null || true)"
+            ok=1
+            for f in $files; do [ -e "$f" ] || ok=0; done
+            if [ -z "$files" ] || [ $ok = 0 ]; then
+              echo "::warning::$t did not build"
+              continue
+            fi
+            mkdir -p "$dist/$name"
+            for f in $files; do cp -R "$f" "$dist/$name/"; done
+          done < "$RUNNER_TEMP/clean"
           git rev-parse HEAD > "$dist/COMMIT"
           echo "$IOS" > "$dist/IOS"
+          xcodebuild -version > "$dist/XCODE"
           cd "$dist"
           find . -type f ! -name SHA256SUMS | sort | xargs shasum -a 256 > SHA256SUMS
           cat SHA256SUMS
