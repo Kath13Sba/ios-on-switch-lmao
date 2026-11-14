@@ -47,9 +47,12 @@ jobs:
           IOS: ${{ inputs.ios }}
         run: |
           : > "$RUNNER_TEMP/clean"
+          # Fails closed: a query that errors (as one over a target that cannot be analyzed does) counts as reaching.
           for t in $TARGETS; do
-            path="$(bazel cquery --config=release --config="$IOS" "somepath($t, @ipsw//...)" 2>/dev/null || true)"
-            if [ -n "$path" ]; then
+            if ! path="$(bazel query "somepath($t, @ipsw//...)" 2> "$RUNNER_TEMP/query.err")"; then
+              echo "::warning::$t: the IPSW query failed; not built or uploaded"
+              tail -3 "$RUNNER_TEMP/query.err"
+            elif [ -n "$path" ]; then
               echo "::warning::$t reaches the IPSW; not built or uploaded:"
               echo "$path" | head -5
             else
@@ -57,10 +60,14 @@ jobs:
             fi
           done
           cat "$RUNNER_TEMP/clean"
+      # The GPU's raw runtime has release-only unused parameters/variables under -Werror (ios27 + release).
       - name: Build the parts
         env:
           IOS: ${{ inputs.ios }}
-        run: bazel build --config=release --config="$IOS" --keep_going $(cat "$RUNNER_TEMP/clean") || true
+        run: >-
+          bazel build --config=release --config="$IOS" --keep_going
+          --per_file_copt='drivers/TegraGM20BMetal/raw/.*@-Wno-error=unused-parameter,-Wno-error=unused-variable,-Wno-error=unused-const-variable'
+          $(cat "$RUNNER_TEMP/clean") || true
       - name: Collect the parts
         env:
           IOS: ${{ inputs.ios }}
