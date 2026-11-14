@@ -23,6 +23,7 @@ jobs:
       TARGETS: >-
         //gpu:base
         //kernel:kernel_unprelinked_12377
+        //kernel/xnu-12377.121.6/config:symbolsets_plist
         //boot:loader
         //boot:loader_constants
         //boot/installer:install-ios.bin
