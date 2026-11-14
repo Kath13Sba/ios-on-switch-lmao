@@ -1,0 +1,50 @@
+name: Build iOS 27 assets
+# The release's IPSW-free assets (//release:assets: sd, image-inputs with the linked kernel, gpu, overlay, loader, and
+# the host tools), built by Xcode on GitHub's macOS runner for the iOS this run names. Nothing here is made from the IPSW
+# or the device's data: release/ipsw_free.bzl refuses any such file at analysis. The image itself is composed elsewhere.
+on:
+  workflow_dispatch:
+    inputs:
+      ios:
+        description: The iOS to build for (.bazelrc's config).
+        type: choice
+        options: [ios27, ios17]
+        default: ios27
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./.github/actions/bazel
+        with:
+          cache: assets-${{ inputs.ios }}
+          upload: "true"
+      - name: Build the assets
+        run: bazel build --config=release --config=${{ inputs.ios }} //release:assets
+      - name: Collect the assets
+        env:
+          IOS: ${{ inputs.ios }}
+        run: |
+          dist="$RUNNER_TEMP/dist"
+          mkdir "$dist"
+          for f in $(bazel cquery --config=release --config="$IOS" --output=files //release:assets); do
+            cp "$f" "$dist/"
+          done
+          git rev-parse HEAD > "$dist/COMMIT"
+          echo "$IOS" > "$dist/IOS"
+          cd "$dist"
+          shasum -a 256 -- * > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: assets-${{ inputs.ios }}
+          path: ${{ runner.temp }}/dist
+          if-no-files-found: error
+      # Kept even when the build fails or runs out of time, so the next run starts from what this one built.
+      - if: always()
+        uses: ./.github/actions/bazel-save
+        with:
+          cache: assets-${{ inputs.ios }}
