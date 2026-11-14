@@ -47,14 +47,15 @@ jobs:
           IOS: ${{ inputs.ios }}
         run: |
           : > "$RUNNER_TEMP/clean"
-          # Fails closed: a query that errors counts as reaching. cquery: the selected configuration's graph.
+          # Fails closed: deps() of the target in the selected configuration (not every package of @ipsw, which would
+          # fetch the IPSW's images); an error, or any dependency in an @ipsw repository, skips the target.
           for t in $TARGETS; do
-            if ! path="$(bazel cquery --config=release --config="$IOS" "somepath($t, @ipsw//...)" 2> "$RUNNER_TEMP/query.err")"; then
-              echo "::warning::$t: the IPSW query failed; not built or uploaded"
+            if ! deps="$(bazel cquery --config=release --config="$IOS" --output=label "deps($t)" 2> "$RUNNER_TEMP/query.err")"; then
+              echo "::warning::$t: the dependency query failed; not built or uploaded"
               tail -3 "$RUNNER_TEMP/query.err"
-            elif [ -n "$path" ]; then
-              echo "::warning::$t reaches the IPSW; not built or uploaded:"
-              echo "$path" | head -5
+            elif echo "$deps" | grep -qE '^@@?(\+ipsw\+|ipsw)'; then
+              echo "::warning::$t depends on the IPSW; not built or uploaded:"
+              echo "$deps" | grep -E '^@@?(\+ipsw\+|ipsw)' | head -5
             else
               echo "$t" >> "$RUNNER_TEMP/clean"
             fi
