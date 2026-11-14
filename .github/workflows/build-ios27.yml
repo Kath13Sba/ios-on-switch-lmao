@@ -22,8 +22,15 @@ jobs:
         with:
           cache: assets-${{ inputs.ios }}
           upload: "true"
+      # //release:assets carries iOS 17's linked kernel whatever the config (install:kernel_inputs), so iOS 27's linked,
+      # unprelinked kernel (XNU's source and this project's drivers only) is built and collected beside it.
       - name: Build the assets
-        run: bazel build --config=release --config=${{ inputs.ios }} //release:assets
+        env:
+          IOS: ${{ inputs.ios }}
+        run: |
+          targets=(//release:assets)
+          [ "$IOS" = ios27 ] && targets+=(//kernel:kernel_unprelinked_12377)
+          bazel build --config=release --config="$IOS" "${targets[@]}"
       - name: Collect the assets
         env:
           IOS: ${{ inputs.ios }}
@@ -33,10 +40,16 @@ jobs:
           for f in $(bazel cquery --config=release --config="$IOS" --output=files //release:assets); do
             cp "$f" "$dist/"
           done
+          if [ "$IOS" = ios27 ]; then
+            mkdir "$dist/kernel-12377"
+            for f in $(bazel cquery --config=release --config="$IOS" --output=files //kernel:kernel_unprelinked_12377); do
+              cp "$f" "$dist/kernel-12377/"
+            done
+          fi
           git rev-parse HEAD > "$dist/COMMIT"
           echo "$IOS" > "$dist/IOS"
           cd "$dist"
-          shasum -a 256 -- * > SHA256SUMS
+          find . -type f ! -name SHA256SUMS | sort | xargs shasum -a 256 > SHA256SUMS
           cat SHA256SUMS
       - uses: actions/upload-artifact@v7.0.2
         with:
