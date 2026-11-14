@@ -71,7 +71,7 @@ jobs:
           perl -pi -e 's/^constexpr uint32_t kShortcutWords/[[maybe_unused]] constexpr uint32_t kShortcutWords/' drivers/TegraGM20BMetal/raw/runtime/raw_gpu.cpp
           perl -pi -e 's/^const char \*expandXrPlanes\(PassDesc &p, Device &d\)/const char *expandXrPlanes(PassDesc &p, [[maybe_unused]] Device &d)/' drivers/TegraGM20BMetal/raw/runtime/raw_xr_texture.cpp
           git diff --stat
-          [ "$(git diff --numstat -- drivers/TegraGM20BMetal/raw/runtime | wc -l)" = 3 ] || { echo '::error::the three GPU edits did not all apply'; exit 1; }
+          [ "$(git diff --numstat -- drivers/TegraGM20BMetal/raw/runtime | wc -l | tr -d " ")" = 3 ] || { echo '::error::the three GPU edits did not all apply'; exit 1; }
           bazel build --config=release --config="$IOS" --keep_going $(cat "$RUNNER_TEMP/clean") || true
       - name: Collect the parts
         env:
