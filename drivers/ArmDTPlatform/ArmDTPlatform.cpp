@@ -15,6 +15,7 @@
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOLib.h>
+#include <IOKit/IONVRAM.h>
 #include <IOKit/rtc/IORTCController.h>
 #include <libkern/c++/OSData.h>
 #include <libkern/c++/OSIterator.h>
@@ -97,6 +98,17 @@ void ArmDTPlatform::setUTCTimeOfDay(clock_sec_t secs, clock_nsec_t nsecs)
 
 bool ArmDTPlatform::hasNVRAMProxy(IOService *provider)
 {
+    // XNU publishes IODTNVRAM from the proxy before IOKit matching starts (IOPlatformExpertDevice::createNVRAM, on
+    // /options) and a RELEASE kernel then deletes /chosen/nvram-proxy-data (IODTNVRAM::initImageFormat, xnu-12377):
+    // when /options is already that IODTNVRAM, the proxy has been used, and publishNVRAM() takes the existing one.
+    IORegistryEntry *options = IORegistryEntry::fromPath("/options", gIODTPlane);
+    const bool published = OSDynamicCast(IODTNVRAM, options) != nullptr;
+    if (options != nullptr) {
+        options->release();
+    }
+    if (published) {
+        return true;
+    }
     const IORegistryEntry *chosen = provider->childFromPath("chosen", gIODTPlane);
     if (chosen == nullptr) {
         return false;
