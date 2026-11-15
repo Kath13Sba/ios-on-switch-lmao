@@ -31,6 +31,16 @@ void tegra_display_resume(void);
 #define TEGRA_DISPLAY_PANEL_AMS699VC01 0x2050
 uint32_t tegra_display_panel_id(void);
 
+// The 2019 Switch's 6.2" LCDs (hekate's JDI, InnoLux P062CCA, AUO A062TAN01 and the 6.2" clone): every panel but the OLED's is
+// an LCD, with hekate's LCD rails (AVDD PI0/PI1), WLED driver (PV1) and PWM0 backlight (PV0) around the power-down and up.
+bool tegra_display_panel_is_lcd(void);
+// The panel is one tegra_display_power_down/up know: the OLED's or one of the LCDs above.
+bool tegra_display_panel_supported(void);
+// The LCD backlight's PWM0 duty, 0..255 (hekate's scale); no-ops (-1) on the OLED or while PWM0 is gated (before
+// tegra_display_power_up after SC7). Thread context.
+void tegra_display_backlight_set(unsigned duty);
+int tegra_display_backlight_get(void);
+
 // After the panel is asleep and DC A has stopped at a frame end: DC A unpowered with its interrupts off, DSI disabled with its
 // pads powered down, panel reset asserted, MIPI-cal, DSI and DISP1 clocks gated and in reset. The MAX77620 LDO0 (DSI AVDD
 // 1.2 V) has no FPS slot on this board (tegra210b01-nx-pmic.dtsi: active-fps-source NONE), so it stays as software leaves it

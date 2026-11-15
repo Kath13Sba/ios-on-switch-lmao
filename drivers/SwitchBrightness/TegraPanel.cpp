@@ -52,6 +52,21 @@ extern "C" __attribute__((weak)) void native_legacy_frame_end_release(void)
 
 extern "C" bool native_legacy_frame_end_held(void);
 
+// The 2019 Switch's LCDs (TegraDisplayPower.h): the backlight is PWM0, not a DCS command. These defaults stand for a build
+// without TegraDisplayPower.o, which drives the OLED only.
+extern "C" __attribute__((weak)) bool tegra_display_panel_is_lcd(void)
+{
+    return false;
+}
+
+extern "C" __attribute__((weak)) void tegra_display_backlight_set(unsigned)
+{}
+
+extern "C" __attribute__((weak)) int tegra_display_backlight_get(void)
+{
+    return -1;
+}
+
 namespace {
 using namespace tegra_panel;
 constexpr vm_offset_t kCarPA = 0x60006000, kDisplayAPA = 0x54200000, kDsiPA = 0x54300000;
@@ -293,9 +308,21 @@ int sendBrightness(unsigned level)
     return sendPacket(words, 2, "brightness");
 }
 
+// An LCD's PWM duty (hekate's 0..255) for a level of 0..TEGRA_PANEL_BRIGHTNESS_MAX, and back.
+unsigned dutyOf(unsigned level)
+{
+    return (level * 255u + TEGRA_PANEL_BRIGHTNESS_MAX / 2) / TEGRA_PANEL_BRIGHTNESS_MAX;
+}
+
 // Under the lock.
 int setBrightness(unsigned level)
 {
+    if (tegra_display_panel_is_lcd()) {
+        if (!displayRunning())
+            return -1;
+        tegra_display_backlight_set(dutyOf(level));
+        return 0;
+    }
     int result = 0;
     if (!gControlSent) {
         result = sendCommand(kControlDisplay, kBrightnessControl | kDimmingControl, "brightness control");
@@ -310,6 +337,13 @@ int bootLevel()
 {
     if (!displayRunning())
         return -1;
+    if (tegra_display_panel_is_lcd()) {
+        // hekate leaves the LCD's level in PWM0 itself (display_backlight_brightness).
+        const int lcdDuty = tegra_display_backlight_get();
+        if (lcdDuty <= 0)
+            return -1;
+        return lcdDuty * TEGRA_PANEL_BRIGHTNESS_MAX / 255;
+    }
     const uint32_t duty = gDc[DC_COM_SCRATCH_REGISTER_B];
     if (!duty || duty > 255)
         return -1;
@@ -353,6 +387,22 @@ extern "C" int tegra_panel_power_off(void)
                 gHaveLevel = true;
             }
         }
+        if (tegra_display_panel_is_lcd()) {
+            // hekate _display_panel_and_hw_end for an LCD: backlight off (PWM0 duty 0), display off, one frame and the
+            // packet (16.9 ms), sleep in, 50 ms.
+            if (!displayRunning())
+                return -1;
+            tegra_display_backlight_set(0);
+            int result = sendCommand(kDisplayOff, "display off");
+            if (result)
+                return result;
+            IOSleep(20);
+            result = sendCommand(kEnterSleep, "sleep in");
+            if (result)
+                return result;
+            IOSleep(50);
+            return 0;
+        }
         int result = sendBrightness(0);
         if (result)
             return result;
@@ -380,6 +430,25 @@ extern "C" int tegra_panel_power_on(int level)
         if (result)
             return result;
         IOSleep(180);
+        if (tegra_display_panel_is_lcd()) {
+            // An LCD: display on, then the backlight back at the last level (PWM0; there is no DCS brightness).
+            result = sendCommand(kDisplayOn, "display on");
+            if (result)
+                return result;
+            IOSleep(20);
+            unsigned target = TEGRA_PANEL_BRIGHTNESS_MAX / 2;
+            if (level >= 0) {
+                target = static_cast<unsigned>(level);
+            } else if (gHaveLevel) {
+                target = gLevel;
+            }
+            if (target > TEGRA_PANEL_BRIGHTNESS_MAX)
+                target = TEGRA_PANEL_BRIGHTNESS_MAX;
+            tegra_display_backlight_set(dutyOf(target));
+            gLevel = target;
+            gHaveLevel = true;
+            return 0;
+        }
         result = sendCommand(kControlDisplay, kBrightnessControl | kDimmingControl, "brightness control");
         if (result)
             return result;

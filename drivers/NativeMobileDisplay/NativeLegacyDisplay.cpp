@@ -321,6 +321,11 @@ extern "C" __attribute__((weak)) uint32_t tegra_display_panel_id(void)
     panic("SwitchDisplay: SC7 needs TegraDisplayPower.o in the build");
 }
 
+extern "C" __attribute__((weak)) bool tegra_display_panel_supported(void)
+{
+    panic("SwitchDisplay: SC7 needs TegraDisplayPower.o in the build");
+}
+
 extern "C" __attribute__((weak)) void tegra_display_power_down(void)
 {
     panic("SwitchDisplay: SC7 needs TegraDisplayPower.o in the build");
@@ -5474,9 +5479,10 @@ static NativeLegacyDisplay *sc7Display(const char *step)
     if (!display || !display->getWorkLoop())
         panic("SwitchDisplay: %s before the display started", step);
     const uint32_t panel = tegra_display_panel_id();
-    if (panel != TEGRA_DISPLAY_PANEL_AMS699VC01) {
-        panic("SwitchDisplay: %s: panel %#x has no cold init here (only the OLED's AMS699VC01, %#x)", step, panel,
-              TEGRA_DISPLAY_PANEL_AMS699VC01);
+    if (!tegra_display_panel_supported()) {
+        panic("SwitchDisplay: %s: panel %#x has no cold init here (the OLED's AMS699VC01 %#x, or the 2019 Switch's "
+              "6.2\" JDI, InnoLux, AUO or clone LCD)",
+              step, panel, TEGRA_DISPLAY_PANEL_AMS699VC01);
     }
     return display;
 }
