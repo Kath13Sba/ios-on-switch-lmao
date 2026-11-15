@@ -1,0 +1,47 @@
+name: Build iOS 27 kernel (private)
+# Private repository only: //kernel:kernel_unprelinked_12377 depends on the IPSW's kernelcache (fetched from Apple's
+# own CDN by the build), so its artifact stays in this private repository and is never published. It is the linked,
+# unprelinked xnu-12377 kernel; Apple's kexts are prelinked into it elsewhere, from Apple's IPSW.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Refuse to run in a public repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          visibility="$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)"
+          echo "repository visibility: $visibility"
+          [ "$visibility" = private ] || { echo "::error::this workflow only runs in a private repository"; exit 1; }
+      - uses: ./.github/actions/bazel
+        with:
+          cache: kernel-ios27
+          upload: "true"
+      - name: Build the kernel
+        run: bazel build --config=release --config=ios27 //kernel:kernel_unprelinked_12377
+      - name: Collect it
+        run: |
+          dist="$RUNNER_TEMP/dist"
+          mkdir "$dist"
+          for f in $(bazel cquery --config=release --config=ios27 --output=files //kernel:kernel_unprelinked_12377); do
+            cp "$f" "$dist/"
+          done
+          git rev-parse HEAD > "$dist/COMMIT"
+          xcodebuild -version > "$dist/XCODE"
+          cd "$dist" && shasum -a 256 -- * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: kernel-ios27
+          path: ${{ runner.temp }}/dist
+          retention-days: 3
+          if-no-files-found: error
+      - if: always()
+        uses: ./.github/actions/bazel-save
+        with:
+          cache: kernel-ios27
