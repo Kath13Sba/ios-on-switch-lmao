@@ -6,7 +6,7 @@
 # Boot-args (COMMAND_LINE) live in tools/package/boot_args.py; the ADT edits, USB_HOST and DISPLAY_GAMUT in
 # tools/package/adt_edit.py; the steps and what each reads in boot/defs.bzl.
 load("@bazel_skylib//lib:selects.bzl", "selects")
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "bool_setting")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "bool_setting", "string_flag")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_python//python:py_test.bzl", "py_test")
@@ -126,7 +126,10 @@ boot_package(
     bootlogo = "//boot/logo:bootlogo.bmp",
     bt_patch = "//bazel/pinned:firmware/BCM4356A3.hcd",
     data_seed = "//bazel/pinned:data-seed/data-v10.dbr",
-    dtb = "//bazel/pinned:firmware/oled-sku3.dtb",
+    dtb = select({
+        ":board_iowa": "//bazel/pinned:firmware/iowa-sku1.dtb",
+        "//conditions:default": "//bazel/pinned:firmware/oled-sku3.dtb",
+    }),
     exporter = "//bazel/pinned:firmware/exporter.uimg",
     icon = "//boot/logo:icon_ios_hue.bmp",
     ini = ":ios_ini",
@@ -220,7 +223,10 @@ boot_package(
         "//install:from_release": "@switch_release//:loader_constants",
         "//conditions:default": None,
     }),
-    script_template = ":u-boot-script.txt",
+    script_template = select({
+        ":board_iowa": ":u-boot-script-iowa.txt",
+        "//conditions:default": ":u-boot-script.txt",
+    }),
     smp = select({
         "//install:from_release": ":release_smp",
         "//conditions:default": ":smp",
@@ -322,3 +328,19 @@ filegroup(
         exclude = ["BUILD.bazel"],
     ),
 )
+
+# The board the boot package is for (switch v2 port, phase 1a): its device tree and the one sku the script accepts.
+string_flag(
+    name = "board",
+    build_setting_default = "aula",
+    values = [
+        "aula",
+        "iowa",
+    ],
+)
+
+config_setting(
+    name = "board_iowa",
+    flag_values = {":board": "iowa"},
+)
+
